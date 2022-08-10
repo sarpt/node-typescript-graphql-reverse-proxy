@@ -24,7 +24,13 @@ const commands: Record<string, () => Promise<void>> = {
     console.log(`info received: ${res.info}`);
   },
   ping: async () => {
-
+    const uid = process.argv[3];
+    await axios.get('http://localhost:4000/ping', {
+      headers: {
+        'X-Serv-Uid': uid,
+      }
+    });
+    console.log(`Ping successful for uid: ${uid}`);
   }
 };
 

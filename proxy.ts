@@ -5,8 +5,20 @@ import httpProxy from 'http-proxy';
 const proxy = httpProxy.createProxyServer();
 
 const port = 4000;
+const pingTimeoutSec = 30;
 
-const uidToPort = new Map<string, { process: ChildProcessWithoutNullStreams, port: number }>();
+type Worker = { process: ChildProcessWithoutNullStreams, port: number, timeout: NodeJS.Timeout };
+const uidToWorker = new Map<string, Worker>();
+
+function restartWorkerTimeout(uid: string, worker: Worker, reason: string) {
+  clearTimeout(worker.timeout);
+  worker.timeout = setTimeout(() => {
+    console.log(`Timeout of ${pingTimeoutSec} seconds reached for worker ${uid} due to inaction - killing the worker at ${new Date(Date.now()).toISOString()}`);
+    worker.process.kill();
+    uidToWorker.delete(uid);
+  }, pingTimeoutSec * 1000);
+  console.log(`Timeout restarted for worker ${uid} on ${new Date(Date.now()).toISOString()}; Reason provided: ${reason}`);
+}
 
 let serverPort = 4001;
 let serverUid = 1000;
@@ -29,20 +41,44 @@ app.use('/handshake', (req, res) => {
   });
 
   const workerUid = serverUid++;
-  uidToPort.set(`${workerUid}`, { process: worker, port: workerPort });
+
+  const timeout = setTimeout(() => {
+    console.log(`Timeout of ${pingTimeoutSec} seconds reached for worker ${workerUid} due to inaction - killing the worker at ${new Date(Date.now()).toISOString()}`);
+    worker.kill();
+    uidToWorker.delete(`${workerUid}`);
+  }, pingTimeoutSec * 1000);
+
+  uidToWorker.set(`${workerUid}`, { process: worker, port: workerPort, timeout });
   res.status(200);
   res.send({ uid: workerUid });
 });
 
-app.use('/graphql', (req, res) => {
+app.use('/ping', (req, res) => {
   const uid = req.header('X-Serv-Uid');
-  if (!uid || !uidToPort.has(uid)) {
-    res.status(403);
+  if (!uid || !uidToWorker.has(uid)) {
+    res.status(300);
     res.send();
     return;
   }
 
-  const processPort = uidToPort.get(uid)?.port;
+  const worker = uidToWorker.get(uid)!;
+  restartWorkerTimeout(uid, worker, 'ping request');
+  res.status(200);
+  res.send();
+});
+
+app.use('/graphql', (req, res) => {
+  const uid = req.header('X-Serv-Uid');
+  if (!uid || !uidToWorker.has(uid)) {
+    res.status(300);
+    res.send();
+    return;
+  }
+
+  const worker = uidToWorker.get(uid)!;
+  restartWorkerTimeout(uid, worker, 'graphql request');
+
+  const processPort = uidToWorker.get(uid)?.port;
   proxy.web(req, res, {
     target: `http://localhost:${processPort}/graphql`
   });
