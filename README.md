@@ -1,4 +1,4 @@
-## Example of reverse proxy - node + typescript + graphql
+## Example of reverse proxy using node + typescript + graphql
 
 A reverse proxy in node + typescript which launches graphql instances. An example usage in form of node client is also provided.
 Proxy has timeout of 30s implemented which, after which proxy kills the server instance due to inactivity.
